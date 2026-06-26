@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AI Job Finder</title>
+  <link rel="stylesheet" href="/static/style.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+</head>
+<body>
+
+<div class="bg-orb orb1"></div>
+<div class="bg-orb orb2"></div>
+<div class="bg-orb orb3"></div>
+
+<header>
+  <div class="logo">⚡ JobAI</div>
+  <h1>Find Your <span>Dream Job</span></h1>
+  <p>Smart AI-powered job search across multiple sources</p>
+
+  <div class="search-bar">
+    <div class="search-wrapper">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="keyword" placeholder="Search e.g. python, AI, frontend..." autocomplete="off"/>
+      <div class="suggestions-box" id="suggestions"></div>
+    </div>
+    <button onclick="searchJobs()">Search</button>
+  </div>
+
+  <div class="filters">
+  <select id="filter-country">
+    <option value="all">🌍 All Countries</option>
+    <option value="in">🇮🇳 India</option>
+    <option value="gb">🇬🇧 UK</option>
+    <option value="us">🇺🇸 USA</option>
+    <option value="au">🇦🇺 Australia</option>
+    <option value="ca">🇨🇦 Canada</option>
+    <option value="de">🇩🇪 Germany</option>
+  </select>
+  <select id="filter-type">
+    <option value="">All Job Types</option>
+    <option value="full_time">Full Time</option>
+    <option value="part_time">Part Time</option>
+    <option value="contract">Contract</option>
+    <option value="internship">Internship</option>
+  </select>
+  <select id="filter-remote">
+    <option value="">🏢 All Locations</option>
+    <option value="remote">🌐 Remote Only</option>
+  </select>
+  <button class="btn-filter" onclick="searchJobs()">Apply Filters</button>
+</div>
+</header>
+
+<main>
+  <div id="status"></div>
+  <div id="results"></div>
+  <div id="load-more-container"></div>
+</main>
+
+<script>
+  let currentKeyword = "";
+  let currentPage = 1;
+  let totalJobs = 0;
+  let suggestionTimeout = null;
+
+  const glassColors = [
+    { border: "rgba(167,139,250,0.25)", glow: "rgba(167,139,250,0.08)", accent: "#a78bfa" },
+    { border: "rgba(96,165,250,0.25)",  glow: "rgba(96,165,250,0.08)",  accent: "#60a5fa" },
+    { border: "rgba(52,211,153,0.25)",  glow: "rgba(52,211,153,0.08)",  accent: "#34d399" },
+    { border: "rgba(251,191,36,0.25)",  glow: "rgba(251,191,36,0.08)",  accent: "#fbbf24" },
+    { border: "rgba(244,114,182,0.25)", glow: "rgba(244,114,182,0.08)", accent: "#f472b6" },
+  ];
+
+  // ── SUGGESTIONS ──────────────────────────────────────────────
+  document.getElementById("keyword").addEventListener("input", function() {
+    clearTimeout(suggestionTimeout);
+    const q = this.value.trim();
+    if (q.length < 2) { hideSuggestions(); return; }
+    suggestionTimeout = setTimeout(() => fetchSuggestions(q), 200);
+  });
+
+  document.getElementById("keyword").addEventListener("keydown", function(e) {
+    if (e.key === "Enter") { hideSuggestions(); searchJobs(); }
+    if (e.key === "Escape") hideSuggestions();
+  });
+
+  document.addEventListener("click", function(e) {
+    if (!e.target.closest(".search-wrapper")) hideSuggestions();
+  });
+
+  function fetchSuggestions(q) {
+    fetch("/suggestions?q=" + encodeURIComponent(q))
+      .then(r => r.json())
+      .then(suggestions => {
+        const box = document.getElementById("suggestions");
+        if (!suggestions.length) { hideSuggestions(); return; }
+        box.innerHTML = suggestions.map(s =>
+          `<div class="suggestion-item" onclick="selectSuggestion('${s}')">${s}</div>`
+        ).join("");
+        box.style.display = "block";
+      });
+  }
+
+  function selectSuggestion(val) {
+    document.getElementById("keyword").value = val;
+    hideSuggestions();
+    searchJobs();
+  }
+
+  function hideSuggestions() {
+    document.getElementById("suggestions").style.display = "none";
+  }
+
+  // ── SEARCH ───────────────────────────────────────────────────
+  function searchJobs() {
+    currentKeyword = document.getElementById("keyword").value.trim();
+    if (!currentKeyword) return;
+    currentPage = 1;
+    document.getElementById("results").innerHTML = buildSkeletons(3);
+    document.getElementById("status").innerHTML = "";
+    document.getElementById("load-more-container").innerHTML = "";
+    hideSuggestions();
+    fetchJobs(true);
+  }
+
+  function fetchJobs(fresh) {
+    const country = document.getElementById("filter-country").value;
+    const jobType = document.getElementById("filter-type").value;
+    const remote  = document.getElementById("filter-remote").value;
+
+    fetch(`/search?keyword=${encodeURIComponent(currentKeyword)}&page=${currentPage}&country=${country}&job_type=${jobType}&remote=${remote}`)
+      .then(r => r.json())
+      .then(data => {
+        totalJobs = data.total;
+
+        if (fresh && data.jobs.length === 0) {
+          document.getElementById("results").innerHTML = `
+            <div class="no-results">
+              <div class="no-results-icon">😕</div>
+              <h3>No jobs found</h3>
+              <p>Try "developer", "engineer" or "AI"</p>
+            </div>`;
+          document.getElementById("load-more-container").innerHTML = "";
+          return;
+        }
+
+        document.getElementById("status").innerHTML = `
+          <div class="results-header">
+            Found <span>${totalJobs}</span> jobs for "<span>${currentKeyword}</span>"
+          </div>`;
+
+        if (fresh) document.getElementById("results").innerHTML = "";
+
+        const offset = (currentPage - 1) * data.per_page;
+
+        data.jobs.forEach(function(job, i) {
+          const color = glassColors[(offset + i) % glassColors.length];
+          const cardIndex = offset + i;
+          const tagsHtml = job.tags.filter(Boolean).map(t =>
+            `<span class="skill-tag">${t}</span>`).join("");
+          const salaryHtml = job.salary
+            ? `<div class="meta-item" style="color:#34d399;background:rgba(52,211,153,0.1)">💰 ${job.salary}</div>` : "";
+          const remoteBadge = job.remote
+            ? `<div class="meta-item" style="color:#fbbf24;background:rgba(251,191,36,0.1)">🌐 ${job.remote}</div>` : "";
+          const dateBadge = job.posted_date
+            ? `<div class="meta-item" style="color:#94a3b8;background:rgba(148,163,184,0.08)">📅 ${job.posted_date}</div>` : "";
+          const sourceBadge = `<span class="source-badge">${job.source}</span>`;
+
+          const card = document.createElement("div");
+          card.className = "job-card";
+          card.style.cssText = `
+            border-color: ${color.border};
+            background: linear-gradient(135deg, rgba(255,255,255,0.04) 0%, ${color.glow} 100%);
+            animation-delay: ${i * 0.08}s;
+          `;
+
+          card.innerHTML = `
+            <div class="card-glow" style="background:radial-gradient(circle at top right,${color.border},transparent 60%)"></div>
+            <div class="card-top">
+              <div class="company-logo" style="background:linear-gradient(135deg,${color.accent},${color.accent}88)">
+                ${job.company.charAt(0).toUpperCase()}
+              </div>
+              <div class="card-header-text">
+                <div class="job-title">${job.title}</div>
+                <div class="job-company" style="color:${color.accent}">${job.company}</div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+                <div class="card-badge" style="color:${color.accent};border-color:${color.border};background:${color.glow}">Remote</div>
+                ${sourceBadge}
+              </div>
+            </div>
+
+            <div class="meta-row">
+              <div class="meta-item" style="color:${color.accent};background:${color.glow}">📍 ${job.location || "Worldwide"}</div>
+              <div class="meta-item" style="color:#60a5fa;background:rgba(96,165,250,0.1)">💼 ${job.job_type || "Full-time"}</div>
+              ${salaryHtml}${remoteBadge}${dateBadge}
+            </div>
+
+            ${tagsHtml ? `<div class="skills-row">${tagsHtml}</div>` : ""}
+
+            <div class="ai-summary" style="border-left-color:${color.accent}">
+              <div class="ai-label" style="color:${color.accent}">🤖 AI Summary</div>
+              <div class="ai-text">${job.summary}</div>
+            </div>
+
+            <div class="card-actions">
+              <a class="btn-apply" href="${job.url}" target="_blank"
+                style="background:linear-gradient(135deg,${color.accent},${color.accent}99)">Apply Now →</a>
+              <button class="btn-details" onclick="toggleDetails(${cardIndex},this)"
+                style="color:${color.accent};border-color:${color.border}">View Details</button>
+            </div>
+
+            <div class="full-details" id="details-${cardIndex}" style="display:none">
+              <div class="details-grid">
+                <div class="detail-item"><span>Company</span>${job.company}</div>
+                <div class="detail-item"><span>Location</span>${job.location || "Worldwide"}</div>
+                <div class="detail-item"><span>Job Type</span>${job.job_type || "Remote"}</div>
+                <div class="detail-item"><span>Salary</span>${job.salary || "Not specified"}</div>
+                <div class="detail-item"><span>Posted</span>${job.posted_date || "Unknown"}</div>
+                <div class="detail-item"><span>Source</span>${job.source}</div>
+              </div>
+              <div class="description-text">${job.description}</div>
+              <a class="btn-apply-full" href="${job.url}" target="_blank"
+                style="background:linear-gradient(135deg,${color.accent},${color.accent}99)">Apply for this Job →</a>
+            </div>`;
+
+          document.getElementById("results").appendChild(card);
+        });
+
+        const lmc = document.getElementById("load-more-container");
+        const remaining = totalJobs - currentPage * data.per_page;
+        if (data.has_more) {
+          lmc.innerHTML = `
+            <div style="text-align:center;margin-top:20px">
+              <button class="btn-load-more" onclick="loadMore()">
+                Load More Jobs (${remaining} remaining)
+              </button>
+            </div>`;
+        } else {
+          lmc.innerHTML = `<div class="end-message">✅ You've seen all ${totalJobs} jobs!</div>`;
+        }
+      })
+      .catch(() => {
+        document.getElementById("results").innerHTML = `
+          <div class="no-results">
+            <div class="no-results-icon">❌</div>
+            <h3>Something went wrong</h3>
+            <p>Make sure your Python server is running</p>
+          </div>`;
+      });
+  }
+
+  function loadMore() {
+    currentPage++;
+    document.getElementById("load-more-container").innerHTML = `
+      <div style="text-align:center;padding:20px">
+        <div class="spinner" style="margin:0 auto"></div>
+      </div>`;
+    fetchJobs(false);
+  }
+
+  function toggleDetails(i, btn) {
+    const el = document.getElementById("details-" + i);
+    const open = el.style.display === "block";
+    el.style.display = open ? "none" : "block";
+    btn.textContent = open ? "View Details" : "Hide Details";
+  }
+
+  // ── SKELETONS ────────────────────────────────────────────────
+  function buildSkeletons(n) {
+    let html = "";
+    for (let i = 0; i < n; i++) {
+      html += `
+        <div class="skeleton-card">
+          <div style="display:flex;gap:16px;margin-bottom:18px">
+            <div class="skel skel-logo"></div>
+            <div style="flex:1">
+              <div class="skel skel-title"></div>
+              <div class="skel skel-company"></div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:14px">
+            <div class="skel skel-tag"></div>
+            <div class="skel skel-tag"></div>
+            <div class="skel skel-tag"></div>
+          </div>
+          <div class="skel skel-line"></div>
+          <div class="skel skel-line" style="width:80%"></div>
+          <div class="skel skel-line" style="width:60%"></div>
+        </div>`;
+    }
+    return html;
+  }
+</script>
+
+</body>
+</html>
